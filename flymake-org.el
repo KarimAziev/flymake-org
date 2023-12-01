@@ -192,6 +192,7 @@ the current buffer's FILE name is used."
   (when (fboundp 'flymake-start)
     (flymake-start)))
 
+;;;###autoload
 (defun flymake-org-off ()
   "Disable Flymake for Org linting and start it."
   (interactive)
