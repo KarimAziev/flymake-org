@@ -1,0 +1,67 @@
+#+OPTIONS: ^:nil tags:nil num:nil
+
+* About
+
+Perform on-the-fly linting in Org mode with Flymake.
+
+* Table of Contents                                       :TOC_2_gh:QUOTE:
+#+BEGIN_QUOTE
+- [[#about][About]]
+- [[#requirements][Requirements]]
+- [[#installation][Installation]]
+  - [[#with-use-package-and-straightel][With use-package and straight.el]]
+  - [[#manual-installation][Manual installation]]
+- [[#usage][Usage]]
+  - [[#minor-mode][Minor mode]]
+  - [[#commands][Commands]]
+#+END_QUOTE
+
+* Requirements
+
+| Name  | Version |
+|-------+---------|
+| Emacs |    29.1 |
+| ~org~ |  9.6.11 |
+
+
+* Installation
+
+** With use-package and straight.el
+#+begin_src elisp :eval no
+(use-package flymake-org
+  :straight (flymake-org
+             :repo "KarimAziev/flymake-org"
+             :type git
+             :host github)
+  :commands (flymake-org-mode))
+#+end_src
+
+** Manual installation
+
+Download the source code and put it wherever you like, e.g. into =~/.emacs.d/flymake-org/=
+
+#+begin_src shell :eval no
+git clone https://github.com/KarimAziev/flymake-org.git ~/.emacs.d/flymake-org/
+#+end_src
+
+Add the downloaded directory to the load path:
+
+#+begin_src elisp :eval no
+(add-to-list 'load-path "~/.emacs.d/flymake-org/")
+(require 'flymake-org)
+#+end_src
+
+* Usage
+
+** Minor mode
+Run in =org-mode=:
+
+**** ~M-x flymake-org-mode~
+Enable or disable Flymake for Org mode files to perform on-the-fly linting.
+
+** Commands
+
+**** ~flymake-org-off~
+Disable Flymake for Org linting and start it.
+**** ~flymake-org-on~
+Enable Flymake for Org linting and start it.
