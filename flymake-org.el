@@ -115,6 +115,24 @@ Argument SYMB is the symbol to search for in the `load-history'."
                             (add-hook 'org-mode-hook ',sym)))))
      feats)))
 
+(defun flymake-org-cleanup-tmp-dirs (start-time)
+  "Delete empty temporary directories created after START-TIME.
+
+Argument START-TIME is the time before which temporary directories should not be
+deleted."
+  (let ((default-directory (temporary-file-directory)))
+    (dolist
+        (short-dir (directory-files default-directory nil "\\`org-persist-"))
+      (let ((dir (file-name-as-directory (expand-file-name short-dir
+                                                           default-directory))))
+        (when (and
+               (file-directory-p dir)
+               (directory-empty-p dir))
+          (let* ((created-time (file-attribute-modification-time
+                                (file-attributes dir)))
+                 (is-start-time-less (time-less-p start-time created-time)))
+            (when is-start-time-less
+              (delete-directory dir))))))))
 
 (defun flymake-org-flymake-report (report-fn &rest _args)
   "Report linting results for Org files using Flymake.
@@ -123,6 +141,9 @@ Optional argument REPORT-FN is a function to call with the linting results.
 
 Remaining arguments _ARGS are ignored and not used within the function."
   (when flymake-org--flymake-process
+    (when-let ((start-time
+                (process-get flymake-org--flymake-process 'start-time)))
+      (flymake-org-cleanup-tmp-dirs start-time))
     (when (process-live-p flymake-org--flymake-process)
       (kill-process flymake-org--flymake-process)))
   (let ((temp-file (make-temp-file "flymake-org"))
@@ -150,6 +171,7 @@ Remaining arguments _ARGS are ignored and not used within the function."
                                   load-path))
                               "-l" ,flymake-org-load-filename
                               "--eval" ,(or (flymake-org-get-eval-string) "nil")
+                              "--eval" "(progn (setq-default org-element-cache-persistent nil org-element-use-cache nil))"
                               "--eval" ,(format "(progn (require 'org) (org-babel-do-load-languages 'org-babel-load-languages '%s))" org-babel-load-languages)
                               "-f" "flymake-org-collect"
                               ,temp-file))
@@ -184,7 +206,9 @@ Remaining arguments _ARGS are ignored and not used within the function."
                    (ignore-errors (delete-file temp-file))
                    (kill-buffer output-buffer))))
              :stderr " *stderr of flymake-org"
-             :noquery t)))))
+             :noquery t))
+      (process-put flymake-org--flymake-process 'start-time (current-time))
+      flymake-org--flymake-process)))
 
 ;;;###autoload
 (defun flymake-org-collect (&optional file)
