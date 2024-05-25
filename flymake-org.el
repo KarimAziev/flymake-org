@@ -269,6 +269,13 @@ the current buffer's FILE name is used."
             t))
 
 ;;;###autoload
+(defun flymake-org-in-file ()
+  "Enable Flymake for Org linting if the current buffer is associated with a file."
+  (interactive)
+  (when buffer-file-name
+    (flymake-org-on)))
+
+;;;###autoload
 (defun flymake-org-on ()
   "Enable Flymake for Org linting and start it."
   (interactive)
