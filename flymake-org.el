@@ -87,7 +87,7 @@ Argument SYMB is the symbol to search for in the `load-history'."
                        (cdr it)
                      it)))
           (when (eq sym symb)
-            (when-let ((lib (cdr (assq 'provide items))))
+            (when-let* ((lib (cdr (assq 'provide items))))
               (throw 'foundit lib))))))))
 
 
@@ -106,7 +106,7 @@ Argument SYMB is the symbol to search for in the `load-history'."
 
 (defun flymake-org-get-eval-string ()
   "Generate string to load and hook `org-mode' features."
-  (when-let ((feats (flymake-org-get-org-mode-hook-features)))
+  (when-let* ((feats (flymake-org-get-org-mode-hook-features)))
     (mapconcat
      (pcase-lambda (`(,sym . ,lib))
        (prin1-to-string `(progn
@@ -141,7 +141,7 @@ Optional argument REPORT-FN is a function to call with the linting results.
 
 Remaining arguments _ARGS are ignored and not used within the function."
   (when flymake-org--flymake-process
-    (when-let ((start-time
+    (when-let* ((start-time
                 (process-get flymake-org--flymake-process 'start-time)))
       (flymake-org-cleanup-tmp-dirs start-time))
     (when (process-live-p flymake-org--flymake-process)
