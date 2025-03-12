@@ -6,7 +6,7 @@
 ;; URL: https://github.com/KarimAziev/flymake-org
 ;; Version: 0.1.0
 ;; Keywords: outlines convenience
-;; Package-Requires: ((emacs "29.1") (org "9.6.11"))
+;; Package-Requires: ((emacs "29.1") (org "9.7.15"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is NOT part of GNU Emacs.
@@ -42,16 +42,19 @@
   :type `(set :inline t ,@(mapcar (lambda (c)
                                     (let ((name (org-lint-checker-name
                                                  c)))
-                                     `(const :tag ,(format "%s (%s)"
-                                                    (or (org-lint-checker-summary
-                                                         c)
-                                                     "")
-                                                    name)
+                                     `(const :tag
+                                       ,(format "%s (%s)"
+                                         (or (org-lint-checker-summary
+                                              c)
+                                          "")
+                                         name)
                                        ,name)))
                            org-lint--checkers)
           (repeat :inline t symbol)))
 
-(defvar flymake-org-load-filename (or load-file-name buffer-file-name))
+(defvar flymake-org-load-filename (if (bound-and-true-p load-file-name)
+                                      load-file-name
+                                    (buffer-file-name)))
 (defvar flymake-org-directory nil)
 
 (defvar-local flymake-org--flymake-process nil
@@ -81,14 +84,14 @@ a buffer with no associated file, or an `eval-region', return nil."
 
 Argument SYMB is the symbol to search for in the `load-history'."
   (catch 'foundit
-    (pcase-dolist (`(,_file . ,items) load-history)
+    (pcase-dolist (`(,file . ,items) load-history)
       (dolist (it items)
         (let ((sym (if (consp it)
                        (cdr it)
                      it)))
           (when (eq sym symb)
             (when-let* ((lib (cdr (assq 'provide items))))
-              (throw 'foundit lib))))))))
+              (throw 'foundit (list file lib)))))))))
 
 
 (defun flymake-org-get-org-mode-hook-features ()
@@ -98,22 +101,95 @@ Argument SYMB is the symbol to search for in the `load-history'."
          (mapcar (lambda (it)
                    (and (symbolp it)
                         (not (or (eq it 'flymake-org-mode)
+                                 (eq it 'flymake-org-in-file)
                                  (eq it 'flymake-org-flymake-init)
                                  (eq it 'flymake-org-on)))
-                        (cons it
-                              (flymake-org-find-symb-feature it))))
+                        (when-let* ((found (flymake-org-find-symb-feature it)))
+                          (append (list it) found))))
                  org-mode-hook))))
+
+(defun flymake-org--get-hook-features-sexps ()
+  "Generate a list of expressions to load features for `org-mode-hook'."
+  (when-let* ((feats (flymake-org-get-org-mode-hook-features)))
+    (let ((result))
+      (pcase-dolist (`(,sym ,file ,_) feats)
+        (setq result (append `((load ,file t t t)
+                               (when (fboundp ',sym)
+                                (add-hook 'org-mode-hook ',sym)))
+                             result)))
+      result)))
+
+
+
+(defun flymake-org--get-all-babel-languages ()
+  "Retrieve all languages supported by Babel in Org mode."
+  (delete-dups
+   (mapcar (lambda (it)
+             (if (stringp it)
+                 (make-symbol it)
+               it))
+           (append
+            (mapcar #'car org-babel-load-languages)
+            (mapcar #'car org-src-lang-modes)
+            (mapcar (pcase-lambda (`(,_t ,_k ,_label ,sym)) sym)
+                    (cdadr (memq :key-type
+                                 (get
+                                  'org-babel-load-languages
+                                  'custom-type))))
+            (flymake-org--get-all-external-babel-languages)
+            (flymake-org--ob-packages)))))
+
+(defun flymake-org--ob-packages ()
+  "List all `org-babel' languages in `features' excluding core and autoloads."
+  (let ((langs))
+    (dolist (it features)
+      (let ((name (symbol-name it)))
+        (when (and
+               (string-prefix-p "ob-" name)
+               (not (member name '("ob-core" "ob-eval" "ob-table" "ob-tangle"
+                                   "ob-comint"
+                                   "ob-exp"
+                                   "ob-lob"
+                                   "ob-ref")))
+               (not (string-suffix-p "autoloads" name)))
+          (push (substring-no-properties name 3) langs))))
+    langs))
+
+(defun flymake-org--get-all-external-babel-languages ()
+  "Retrieve all external Babel languages supported by Org mode."
+  (let* ((suffixes (find-library-suffixes))
+         (regexp (concat (regexp-opt suffixes) "\\'"))
+         (dirs (seq-remove
+                (apply-partially #'string-suffix-p "org")
+                load-path))
+         (files nil))
+    (dolist (dir dirs)
+      (dolist (file (ignore-errors (directory-files dir nil regexp t)))
+        (when (string-match regexp file)
+          (let ((name (substring file 0 (match-beginning 0))))
+            (when (and (string-prefix-p "ob-" name)
+                       (not
+                        (or (string-suffix-p "-autoloads" name)
+                            (string-suffix-p "-mode" name))))
+              (push (substring name 3) files))))))
+    files))
+
+
+(defun flymake-org--get-eval-sexps ()
+  "Generate a list of evaluation expressions for Org mode setup."
+  (append
+   `(progn
+      (setq-default org-element-cache-persistent nil
+       org-element-use-cache nil))
+   (flymake-org--get-hook-features-sexps)
+   `((org-babel-do-load-languages 'org-babel-load-languages
+      ',org-babel-load-languages)
+     (require 'org)
+     (print org-mode-hook))))
 
 (defun flymake-org-get-eval-string ()
   "Generate string to load and hook `org-mode' features."
-  (when-let* ((feats (flymake-org-get-org-mode-hook-features)))
-    (mapconcat
-     (pcase-lambda (`(,sym . ,lib))
-       (prin1-to-string `(progn
-                           (require ',lib nil t)
-                           (when (fboundp ',sym)
-                            (add-hook 'org-mode-hook ',sym)))))
-     feats)))
+  (prin1-to-string (flymake-org--get-eval-sexps)))
 
 (defun flymake-org-cleanup-tmp-dirs (start-time)
   "Delete empty temporary directories created after START-TIME.
@@ -134,6 +210,7 @@ deleted."
             (when is-start-time-less
               (delete-directory dir))))))))
 
+
 (defun flymake-org-flymake-report (report-fn &rest _args)
   "Report linting results for Org files using Flymake.
 
@@ -142,7 +219,7 @@ Optional argument REPORT-FN is a function to call with the linting results.
 Remaining arguments _ARGS are ignored and not used within the function."
   (when flymake-org--flymake-process
     (when-let* ((start-time
-                (process-get flymake-org--flymake-process 'start-time)))
+                 (process-get flymake-org--flymake-process 'start-time)))
       (flymake-org-cleanup-tmp-dirs start-time))
     (when (process-live-p flymake-org--flymake-process)
       (kill-process flymake-org--flymake-process)))
@@ -155,24 +232,24 @@ Remaining arguments _ARGS are ignored and not used within the function."
       (write-region (point-min)
                     (point-max) temp-file nil 'nomessage))
     (unless flymake-org-directory
-      (setq flymake-org-directory (file-name-directory (flymake-org-feature-file 'org))))
+      (setq flymake-org-directory
+            (file-name-directory (flymake-org-feature-file 'org))))
     (let* ((output-buffer (generate-new-buffer " *flymake-org*")))
       (setq flymake-org--flymake-process
             (make-process
              :name "flymake-org"
              :buffer output-buffer
              :command (delq nil
-                            `(,(expand-file-name invocation-name invocation-directory)
+                            `(,(expand-file-name invocation-name
+                                invocation-directory)
                               "-Q"
                               "--batch"
                               ,@(mapcan (lambda (path)
                                           (list "-L" path))
                                  (append (list "./")
                                   load-path))
+                              "--eval" ,(flymake-org-get-eval-string)
                               "-l" ,flymake-org-load-filename
-                              "--eval" ,(or (flymake-org-get-eval-string) "nil")
-                              "--eval" "(progn (setq-default org-element-cache-persistent nil org-element-use-cache nil))"
-                              "--eval" ,(format "(progn (require 'org) (org-babel-do-load-languages 'org-babel-load-languages '%s))" org-babel-load-languages)
                               "-f" "flymake-org-collect"
                               ,temp-file))
              :connection-type 'pipe
@@ -203,7 +280,8 @@ Remaining arguments _ARGS are ignored and not used within the function."
                                 :panic
                                 :explanation
                                 (format "flymake-org process %s died" proc))))
-                   (ignore-errors (delete-file temp-file))
+                   (ignore-errors
+                     (delete-file temp-file))
                    (kill-buffer output-buffer))))
              :stderr " *stderr of flymake-org"
              :noquery t))
@@ -217,15 +295,16 @@ Remaining arguments _ARGS are ignored and not used within the function."
 Optional argument FILE is the name of the file to be checked. If not provided,
 the current buffer's FILE name is used."
   (interactive (list buffer-file-name))
-  (require 'org)
-  (require 'org-lint)
-  (require 'ob)
   (let* ((file (or file (car command-line-args-left)))
          (result))
     (with-temp-buffer
       (insert-file-contents file)
       (let ((buffer-file-name file))
+        (require 'org)
+        (require 'org-lint)
+        (require 'ob)
         (org-mode)
+        (run-hooks 'org-mode-hook)
         (goto-char (point-min))
         (let ((ast (org-element-parse-buffer nil nil 'defer)))
           (setq result (mapcan
@@ -237,7 +316,9 @@ the current buffer's FILE name is used."
                                          ('low :warning)
                                          (_ :note)))
                                  (categories (org-lint-checker-categories c))
-                                 (category-prefix (if categories (format "%s " categories) "")))
+                                 (category-prefix (if categories
+                                                      (format "%s " categories)
+                                                    "")))
                             (mapcar
                              (lambda (report)
                                (let* ((beg (if (markerp (car report))
